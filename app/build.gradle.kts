@@ -14,6 +14,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("String", "CHAT_API_URL", "\"\"")
     }
 
     compileOptions {
@@ -30,9 +31,6 @@ android {
         buildConfig = true
     }
 
-    defaultConfig {
-        buildConfigField("String", "CHAT_API_URL", "\"\"\"")
-    }
 }
 
 dependencies {
