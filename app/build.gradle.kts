@@ -27,6 +27,11 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    defaultConfig {
+        buildConfigField("String", "CHAT_API_URL", "\"\"\"")
     }
 }
 
