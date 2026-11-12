@@ -1,6 +1,9 @@
 package com.example.hakkoai
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.Executors
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -50,7 +53,11 @@ private fun HakkoApp() {
     var tab by remember { mutableStateOf(0) }
     var selectedCharacter by remember { mutableStateOf("Neneko") }
     var chatText by remember { mutableStateOf("") }
-    var sentMessages by remember { mutableStateOf(listOf<String>()) }
+    var conversation by remember { mutableStateOf(listOf<ChatMessage>()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var chatError by remember { mutableStateOf<String?>(null) }
+    val chatExecutor = remember { Executors.newSingleThreadExecutor() }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -78,13 +85,33 @@ private fun HakkoApp() {
                 0 -> ChatHome(
                     selectedCharacter = selectedCharacter,
                     onSelect = { selectedCharacter = it },
-                    messages = sentMessages,
+                    messages = conversation,
+                    isLoading = isLoading,
+                    error = chatError,
                     text = chatText,
                     onText = { chatText = it },
-                    onSend = {
-                        if (chatText.isNotBlank()) {
-                            sentMessages = sentMessages + chatText.trim()
+                    onSend = { outgoing ->
+                        if (outgoing.isNotBlank() && !isLoading) {
+                            val updatedHistory = conversation + ChatMessage("user", outgoing)
+                            conversation = updatedHistory
                             chatText = ""
+                            isLoading = true
+                            chatError = null
+                            val character = selectedCharacter
+                            chatExecutor.execute {
+                                try {
+                                    val answer = ChatApi.reply(character, updatedHistory)
+                                    mainHandler.post {
+                                        conversation = conversation + ChatMessage("assistant", answer)
+                                        isLoading = false
+                                    }
+                                } catch (error: Exception) {
+                                    mainHandler.post {
+                                        chatError = error.message ?: "Не удалось получить ответ ИИ."
+                                        isLoading = false
+                                    }
+                                }
+                            }
                         }
                     },
                     modifier = Modifier.padding(padding)
@@ -104,10 +131,12 @@ private fun HakkoApp() {
 private fun ChatHome(
     selectedCharacter: String,
     onSelect: (String) -> Unit,
-    messages: List<String>,
+    messages: List<ChatMessage>,
+    isLoading: Boolean,
+    error: String?,
     text: String,
     onText: (String) -> Unit,
-    onSend: () -> Unit,
+    onSend: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -167,9 +196,36 @@ private fun ChatHome(
                             Text("Online · AI companion", color = Muted, fontSize = 12.sp)
                         }
                     }
-                    Text("Hey! I'm glad you're here. What would you like to talk about today?",
-                        color = Color(0xFFE2E0EC), fontSize = 14.sp)
-                    messages.forEach { Text("You: $it", color = Color(0xFFC9BFFF), fontSize = 13.sp) }
+                    if (messages.isEmpty()) {
+                        Text("Привет! Я готов ответить на твои вопросы. О чём поговорим?",
+                            color = Color(0xFFE2E0EC), fontSize = 14.sp)
+                    }
+                    messages.forEach { message ->
+                        val isUser = message.role == "user"
+                        Surface(
+                            color = if (isUser) Color(0xFF393052) else Color(0xFF252536),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text(if (isUser) "Ты" else selectedCharacter,
+                                    color = if (isUser) Color(0xFFC9BFFF) else Pink,
+                                    fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(4.dp))
+                                Text(message.text, color = Color(0xFFE2E0EC), fontSize = 14.sp)
+                            }
+                        }
+                    }
+                    if (isLoading) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Violet)
+                            Spacer(Modifier.width(10.dp))
+                            Text("$selectedCharacter печатает…", color = Muted, fontSize = 12.sp)
+                        }
+                    }
+                    if (error != null) {
+                        Text(error, color = Color(0xFFFF9B9B), fontSize = 12.sp)
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = text, onValueChange = onText,
@@ -182,7 +238,11 @@ private fun ChatHome(
                             )
                         )
                         Spacer(Modifier.width(8.dp))
-                        IconButton(onClick = onSend, modifier = Modifier.size(48.dp).clip(CircleShape).background(Violet)) {
+                        IconButton(
+                            onClick = { onSend(text.trim()) },
+                            enabled = text.isNotBlank() && !isLoading,
+                            modifier = Modifier.size(48.dp).clip(CircleShape).background(if (text.isNotBlank() && !isLoading) Violet else Color(0xFF414052))
+                        ) {
                             Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
                         }
                     }
